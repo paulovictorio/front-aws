@@ -37,7 +37,6 @@ jobs:
           else
             echo "Tag v0.0.0 já existe — nenhuma ação necessária."
           fi
-
       - name: Calcular nova versão
         id: version
         run: |
@@ -85,9 +84,7 @@ jobs:
           fi
           
           echo "Vesões (atual / nova): $CURRENT_VERSION # $NEW_VERSION"
-
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
           if [ "$CURRENT_VERSION" == "$NEW_VERSION" ]; then
             echo "should_deploy=false" >> $GITHUB_OUTPUT
             echo "Manter versão atual: $CURRENT_VERSION"
@@ -114,7 +111,7 @@ jobs:
         run: |
           REPO_NAME="${{ github.repository }}"
           REPO_NAME="${REPO_NAME#*/}"
-          REPO_NAME="$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')"
+          REPO_NAME=$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')
           echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV 
           echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
           echo "Repositório: $REPO_NAME"
@@ -138,13 +135,11 @@ jobs:
           else
             echo "Repositório $REPO_NAME já existe no Docker Hub."
           fi
-
       - name: Inserir versão no App.js
         if: steps.version.outputs.should_deploy == 'true'
         run: |
           echo "🔧 Inserindo versão no src/App.js"
           VERSION=${{ steps.version.outputs.new_version }}
-
           # Substituir ou adicionar linha com a versão
           sed -i '/<\/Container>/i \
             <Row className="mt-3">\
@@ -152,28 +147,24 @@ jobs:
                 <p style={{ textAlign: "center", fontStyle: "italic" }}>Versão: '"$VERSION"'</p>\
               </Col>\
             </Row>' src/App.js
-
           echo "✅ Versão $VERSION inserida no frontend"
-
       - name: Criar imagem docker
         if: steps.version.outputs.should_deploy == 'true'
         run: |
           echo "Iniciando build da imagem Docker para o repositório $REPO_NAME"
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:${{ steps.version.outputs.new_version }} .
-          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:${{ steps.version.outputs.new_version }} ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:latest
-
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:$new_version .
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:$new_version ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:latest
       - name: Efetuar push da imagem
         if: steps.version.outputs.should_deploy == 'true'
         run: |
-          echo "Fazendo push da imagem Docker para o Docker Hub ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:${{ steps.version.outputs.new_version }}" 
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:${{ steps.version.outputs.new_version }}
+          echo "Fazendo push da imagem Docker para o Docker Hub ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:$new_version" 
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:$new_version
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:latest
-
       
       - name: Atualizar versão no package.json
         if: steps.version.outputs.should_deploy == 'true'
         run: |
-          npm version ${{ steps.version.outputs.new_version }} --no-git-tag-version
+          npm version $new_version --no-git-tag-version
           
       - name: Commit e push
         if: steps.version.outputs.should_deploy == 'true'
@@ -183,27 +174,23 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           git add package.json
-          git commit -m "chore(release): version ${{ steps.version.outputs.new_version }}"
-          git tag v${{ steps.version.outputs.new_version }}
+          git commit -m "chore(release): version $new_version"
+          git tag v$new_version
           git push origin main --tags
-
   deploy:
     runs-on: ubuntu-latest
-    needs: build
-    if: needs.build.outputs.new_version != ''  # Só executa se uma versão foi gerada
-    
-    steps:
-      - name: Configurar variáveis de deploy
-        run: |
-          REPO_NAME="${{ needs.build.outputs.repo_name }}"
-          if [ -z "$REPO_NAME" ]; then
-            REPO_NAME="${{ github.repository }}"
-            REPO_NAME="${REPO_NAME#*/}"
-            REPO_NAME=$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')
-          fi
-          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV
-          echo "Repositório configurado: $REPO_NAME"
+    needs: build  # Garante que o job 'build' será executado antes
 
+    steps:
+      - name: Definir o nome do repositório (caso não exista)
+        if: steps.version.outputs.repo_name == '' || steps.version.outputs.repo_name == null
+        id: define_repo_name
+        run: |
+          REPO_NAME="${{ github.repository }}"
+          REPO_NAME="${REPO_NAME#*/}"
+          echo "REPO_NAME=$REPO_NAME" >> $GITHUB_ENV 
+          echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
+          echo "Repositório: $REPO_NAME"
       - name: Verificar variáveis finais
         run: |
           echo "DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}"
@@ -211,7 +198,6 @@ jobs:
           echo "NEW_VERSION: ${{ needs.build.outputs.new_version }}"
           IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:${{ needs.build.outputs.new_version }}"
           echo "Imagem completa: $IMAGE"
-
       #- name: Debug de variáveis
       #  run: |
       #    echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}"
@@ -237,24 +223,12 @@ jobs:
           key: ${{ secrets.EC2_PRIVATE_KEY }}
           script: |
             REPO_NAME="${{ needs.build.outputs.repo_name }}"
-            if [ -z "$REPO_NAME" ]; then
-              REPO_NAME="${{ github.repository }}"
-              REPO_NAME="${REPO_NAME#*/}"
-              REPO_NAME=$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')
-            fi
             VERSION="${{ needs.build.outputs.new_version }}"
             IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/$REPO_NAME:$VERSION"
-
             echo "🔄 Iniciando deploy da imagem: $IMAGE"
-
-            # Fazer login no Docker Hub
-            echo "🔐 Fazendo login no Docker Hub..."
-            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-
             # Garantir que o Docker esteja disponível
             sudo yum update -y || sudo apt update -y
             sudo systemctl start docker || sudo service docker start
-
             # Verificar container existente
             CONTAINER_ID=$(docker ps -q --filter "name=$REPO_NAME")
             if [ -n "$CONTAINER_ID" ]; then
@@ -265,12 +239,9 @@ jobs:
             else
               echo "ℹ️ Nenhum container atual encontrado com nome: $REPO_NAME"
             fi
-
             echo "🧹 Removendo imagem local antiga, se existir..."
             docker rmi -f "$IMAGE" || echo "ℹ️ Nenhuma imagem antiga encontrada com a tag: $IMAGE"
-
             echo "⬇️ Baixando nova imagem..."
             docker pull $IMAGE
-
             echo "🚀 Subindo novo container... $REPO_NAME $IMAGE"
             docker run -d -p 80:80 --name $REPO_NAME $IMAGE
